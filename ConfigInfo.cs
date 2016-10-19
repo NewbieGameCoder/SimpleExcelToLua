@@ -58,7 +58,7 @@ namespace ExcelToLua
                 for (int j = 0; j < rowCount; ++j)
                 {
                     string data = configTagble.Rows[j][i].ToString();
-                    CellInfo tempCellInfo = new CellInfo(cellName, cellType, data);
+                    CellInfo tempCellInfo = new CellInfo(nestTag, cellName, cellType, data);
                     tempCellInfo.Desc = cellDesc;
 
                     if (j >= rowsInfo.Count)
@@ -82,17 +82,18 @@ namespace ExcelToLua
             }
         }
 
-        public void Serialize(StringBuilder sb, int indent)
+        public bool Serialize(StringBuilder sb, int indent)
         {
             try
             {
                 sb.Append("return ");
-                tabelNodeRoot.Serialize(sb, indent);
+                return tabelNodeRoot.Serialize(sb, indent);
             }
             catch (Exception e)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine(string.Format("序列化表 {0} 发生错误\n{1}", tableName, e.ToString()));
+                return false;
             }
         }
 
@@ -117,7 +118,7 @@ namespace ExcelToLua
 
                 if (!string.IsNullOrEmpty(strNestStructLen))
                 {
-                    if (!int.TryParse(strNestStructLen, out nestEleCount))
+                    if (!int.TryParse(strNestStructLen, out nestEleCount) || nestEleCount == 0)
                     {
                         Console.ForegroundColor = ConsoleColor.Red;
                         Console.WriteLine(string.Format("{0} 第{1}列的集合长度序列化失败", tableName, enumColumnIndex));
@@ -138,7 +139,7 @@ namespace ExcelToLua
             }
             else if (nestEleCount == 1)
             {
-                subNode = new CellInfo(null, "bool", "true");
+                subNode = new CellInfo(null, null, "bool", "true");
                 return subNode;
             }
             curRowNode.Add(subNode);
@@ -166,7 +167,7 @@ namespace ExcelToLua
                     {
                         subNestEleCount = columnCount;
                     }
-                    else if (!int.TryParse(strNestStructLen, out subNestEleCount))
+                    else if (!int.TryParse(strNestStructLen, out subNestEleCount) || subNestEleCount == 0)
                     {
                         Console.ForegroundColor = ConsoleColor.Red;
                         Console.WriteLine(string.Format("{0} 第{1}列的集合长度序列化失败", tableName, enumColumnIndex));
@@ -185,7 +186,7 @@ namespace ExcelToLua
                     subNode.Desc = tableCellDescList[enumColumnIndex];
                     enumColumnIndex = tempEndIndex;
                 }
-                else if (!string.IsNullOrEmpty(cellType))
+                else
                 {
                     ++enumColumnIndex;
                 }
@@ -241,7 +242,6 @@ namespace ExcelToLua
                     TableNode newNode = RowHeirarchyIterator(startColumnIndex, i, columnCount, out endIndex);
                     AppendNewDicNode(curDicNode, rowsInfo[i][startColumnIndex], newNode);
                 }
-
 
                 return curDicNode;
             }
@@ -357,8 +357,11 @@ namespace ExcelToLua
             bNestInTable = true;
         }
 
-        public void Serialize(StringBuilder sb, int indent)
+        public bool Serialize(StringBuilder sb, int indent)
         {
+            bool bSerializeSuc = false;
+            int validContentLength = sb.Length;
+
             if (bNestInTable && !bNestInArray)
             {
                 CellInfo firstEle = this[0] as CellInfo;
@@ -368,7 +371,25 @@ namespace ExcelToLua
             }
 
             indent = bNestInTable && !bNestInArray ? indent + 1 : indent;
-            ToLuaText.TransferList((List<T>)this, sb, indent);
+            if (ToLuaText.TransferList((List<T>)this, sb, indent))
+            {
+                bSerializeSuc = true;
+            }
+            else
+            {
+                if (bNestInArray)
+                {
+                    ToLuaText.AppendIndent(sb, indent);
+                    sb.Append("{}");
+                    bSerializeSuc = true;
+                }
+                else
+                {
+                    sb.Remove(validContentLength, sb.Length - validContentLength);
+                }
+            }
+
+            return bSerializeSuc;
         }
     }
 
@@ -396,8 +417,11 @@ namespace ExcelToLua
             bNestInTable = true;
         }
 
-        public void Serialize(StringBuilder sb, int indent)
+        public bool Serialize(StringBuilder sb, int indent)
         {
+            bool bSerializeSuc = false;
+            int validContentLength = sb.Length;
+
             if (bNestInTable && !bNestInArray)
             {
                 var itor = GetEnumerator();
@@ -411,7 +435,26 @@ namespace ExcelToLua
             indent = bNestInTable && !bNestInArray ? indent + 1 : indent;
             ToLuaText.AppendIndent(sb, indent);
             sb.AppendFormat("--Key代表{0}\n", Desc);
-            ToLuaText.TransferDic((Dictionary<T, U>)this, sb, indent);
+
+            if (ToLuaText.TransferDic((Dictionary<T, U>)this, sb, indent))
+            {
+                bSerializeSuc = true;
+            }
+            else
+            {
+                if (bNestInArray)
+                {
+                    ToLuaText.AppendIndent(sb, indent);
+                    sb.Append("{}");
+                    bSerializeSuc = true;
+                }
+                else
+                {
+                    sb.Remove(validContentLength, sb.Length - validContentLength);
+                }
+            }
+
+            return bSerializeSuc;
         }
     }
 
@@ -422,15 +465,17 @@ namespace ExcelToLua
         bool bContainsArray;
         string originalData;
         string keyName;
+        string cellTag;
         Type cellType;
 
         public string Desc { get; set; }
 
         public string Name { get { return keyName; } }
 
-        public CellInfo(string name, string type, string data)
+        public CellInfo(string cellTag, string name, string type, string data)
         {
             this.keyName = name;
+            this.cellTag = cellTag;
             originalData = data;
 
             switch (type)
@@ -465,6 +510,11 @@ namespace ExcelToLua
         public void NestInArray()
         {
             bNestInArray = true;
+
+            if (string.IsNullOrEmpty(originalData) && cellType != null)
+            {
+                originalData = DefaultValueForType(cellType).ToString();
+            }
         }
 
         public void NestInTable()
@@ -478,6 +528,11 @@ namespace ExcelToLua
             {
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine("Key值为空，序列化失败");
+            }
+            else if (cellType == typeof(float) || cellType == typeof(bool))
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine(string.Format("Key值类型无法为 {0}", cellType));
             }
 
             string tempString = originalData;
@@ -506,22 +561,14 @@ namespace ExcelToLua
             return originalData.GetHashCode() + cellType.GetHashCode();
         }
 
-        public void Serialize(StringBuilder sb, int indent)
+        public bool Serialize(StringBuilder sb, int indent)
         {
-            if (cellType != typeof(string) && string.IsNullOrEmpty(originalData))
-            {
-                if (!bNestInArray)
-                {
-                    /// delete ",\n"
-                    sb.Remove(sb.Length - 2, 2);
-                }
-                else
-                {
-                    /// delete ", "
-                    sb.Remove(sb.Length - 2, 2);
-                }
+            bool bSerializeSuc = false;
 
-                return;
+            if ((cellType == null && string.IsNullOrEmpty(keyName))
+                || (string.IsNullOrEmpty(originalData)/* && string.IsNullOrEmpty(cellTag)*/))
+            {
+                return bSerializeSuc;
             }
             else if (cellType == typeof(bool))
             {
@@ -538,31 +585,34 @@ namespace ExcelToLua
                 }
             }
 
-            if (!bContainsArray || bNestInTable)
+            bool keyNameSerialized = false;
+            if ((!bContainsArray || bNestInTable)
+                && (!bNestInArray && !string.IsNullOrEmpty(keyName)))
             {
+                keyNameSerialized = true;
                 ToLuaText.AppendIndent(sb, indent);
-                if (!bNestInArray && cellType != typeof(bool))
-                {
-                    if (!string.IsNullOrEmpty(keyName))
-                    {
-                        sb.Append(keyName);
-                        sb.Append(" = ");
-                    }
-                }
+                sb.Append(keyName);
+                sb.Append(" = ");
             }
 
+            string dataFormat = cellType == typeof(string) ? "\"{0}\"" : "{0}";
             if (originalData.Contains("|"))
             {
                 var tempStringArray = originalData.Split('|');
                 MethodInfo convertArrayDataGenericMethod = typeof(CellInfo).GetMethod("ConvertArrayData", BindingFlags.NonPublic | BindingFlags.Instance);
                 var convertMethod = convertArrayDataGenericMethod.MakeGenericMethod(new Type[] { cellType });
                 var transferMethod = ToLuaText.MakeGenericArrayTransferMethod(cellType);
+
                 try
                 {
                     var dataArray = convertMethod.Invoke(this, new object[] { tempStringArray });
                     if (!bNestInArray)
                     {
-                        transferMethod.Invoke(null, new object[] { dataArray, sb, 0 });
+                        bool bSeirializeResult = (bool)transferMethod.Invoke(null, new object[] { dataArray, sb, keyNameSerialized ? 0 : indent });
+                        if (bSeirializeResult)
+                        {
+                            bSerializeSuc = true;
+                        }
                     }
                     else
                     {
@@ -570,10 +620,12 @@ namespace ExcelToLua
                         var arrayGetValueMethod = dataArray.GetType().GetMethod("GetValue", new Type[] { typeof(int) });
                         for (int i = 0; i < tempStringArray.Length; ++i)
                         {
-                            sb.Append(arrayGetValueMethod.Invoke(dataArray, new object[] { i }));
+                            sb.AppendFormat(dataFormat, arrayGetValueMethod.Invoke(dataArray, new object[] { i }));
                             if (i < tempStringArray.Length - 1)
                                 sb.Append(", ");
                         }
+
+                        bSerializeSuc = true;
                     }
                 }
                 catch (System.Exception e)
@@ -584,13 +636,26 @@ namespace ExcelToLua
             }
             else
             {
-                string dataFormat = cellType == typeof(string) ? "\"{0}\"" : "{0}";
+                if (!keyNameSerialized)
+                    ToLuaText.AppendIndent(sb, indent);
+
                 string tempStr = string.Format(dataFormat, originalData).Replace("\n", @"\n");
                 sb.Append(tempStr);
+                bSerializeSuc = true;
             }
 
             if (!string.IsNullOrEmpty(Desc))
                 sb.AppendFormat(", --{0}", Desc);
+
+            return bSerializeSuc;
+        }
+
+        public static object DefaultValueForType(Type targetType)
+        {
+            if (targetType == null)
+                return "nil";
+
+            return targetType.IsValueType ? Activator.CreateInstance(targetType) : null;
         }
 
         T[] ConvertArrayData<T>(string[] stringData)

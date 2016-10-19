@@ -8,7 +8,7 @@ using System.Runtime.CompilerServices;
 
 public interface LuaSerialization
 {
-    void Serialize(StringBuilder sb, int indent);
+    bool Serialize(StringBuilder sb, int indent);
     //void UnSerilize(IntPtr L);
 }
 
@@ -41,29 +41,47 @@ public static class ToLuaText
         }
     }
 
-    public static void TransferList<T>(List<T> list, StringBuilder sb, int indent = 0)
+    public static bool TransferList<T>(List<T> list, StringBuilder sb, int indent = 0)
     {
-        TransferArray<T>(list.ToArray(), sb, indent);
+        return TransferArray<T>(list.ToArray(), sb, indent);
     }
 
-    public static void TransferArray<T>(T[] array, StringBuilder sb, int indent = 0)
+    public static bool TransferArray<T>(T[] array, StringBuilder sb, int indent = 0)
     {
+        int validContentLength = sb.Length;
         AppendIndent(sb, indent);
         sb.Append("{");
         var type = typeof(T);
+        bool bSerializeSuc = false;
+
+        if (array.Length <= 0)
+        {
+            bSerializeSuc = false;
+            sb.Remove(sb.Length - validContentLength, validContentLength);
+            return bSerializeSuc;
+        }
 
         if (typeof(LuaSerialization).IsAssignableFrom(type))
         {
+            int tempValidContentLength = sb.Length;
+
             ++indent;
             sb.Append("\n");
             Array.ForEach<T>(array, (value) =>
             {
                 LuaSerialization serializor = value as LuaSerialization;
-                serializor.Serialize(sb, indent);
-                sb.Append(",\n");
+                if (serializor.Serialize(sb, indent))
+                {
+                    bSerializeSuc = true;
+                    sb.Append(",\n");
+                }
             });
             --indent;
-            AppendIndent(sb, indent);
+
+            if (!bSerializeSuc)
+                sb.Remove(tempValidContentLength, sb.Length - tempValidContentLength);
+            else
+                AppendIndent(sb, indent);
         }
         else if (type.IsClass)
         {
@@ -78,6 +96,8 @@ public static class ToLuaText
                     sb.Append(", ");
                 });
                 --indent;
+
+                bSerializeSuc = true;
             }
             else
             {
@@ -91,15 +111,25 @@ public static class ToLuaText
 
                 if (method != null)
                 {
+                    int tempValidContentLength = sb.Length;
+
                     ++indent;
                     sb.Append("\n");
                     Array.ForEach<T>(array, (value) =>
                     {
-                        method.Invoke(null, new object[] { value, sb, indent });
-                        sb.Append(",\n");
+                        bool bSeirializeResult = (bool)method.Invoke(null, new object[] { value, sb, indent });
+                        if (bSeirializeResult)
+                        {
+                            bSerializeSuc = true;
+                            sb.Append(",\n");
+                        }
                     });
                     --indent;
-                    AppendIndent(sb, indent);
+
+                    if (!bSerializeSuc)
+                        sb.Remove(tempValidContentLength, sb.Length - tempValidContentLength);
+                    else
+                        AppendIndent(sb, indent);
                 }
             }
         }
@@ -112,6 +142,8 @@ public static class ToLuaText
                     sb.Append(value);
                     sb.Append(", ");
                 });
+
+                bSerializeSuc = true;
             }
             else
             {
@@ -119,15 +151,33 @@ public static class ToLuaText
             }
         }
 
-        sb.Append("}");
+        if (!bSerializeSuc)
+        {
+            sb.Remove(validContentLength, sb.Length - validContentLength);
+        }
+        else
+        {
+            sb.Append("}");
+        }
+
+        return bSerializeSuc;
     }
 
-    public static void TransferDic<T, U>(Dictionary<T, U> dic, StringBuilder sb, int indent = 0)
+    public static bool TransferDic<T, U>(Dictionary<T, U> dic, StringBuilder sb, int indent = 0)
     {
+        int validContentLength = sb.Length;
         AppendIndent(sb, indent);
         sb.Append("{\n");
         var keyType = typeof(T);
         var valueType = typeof(U);
+        bool bSerializeSuc = false;
+
+        if (dic.Count <= 0)
+        {
+            bSerializeSuc = false;
+            sb.Remove(sb.Length - validContentLength, validContentLength);
+            return bSerializeSuc;
+        }
 
         bool bStringKey = keyType == typeof(string);
         string strTag = bStringKey ? "\"" : "";
@@ -135,6 +185,8 @@ public static class ToLuaText
         AppendIndent(sb, indent);
         foreach (var item in dic)
         {
+            int tempValidContentLength = sb.Length;
+
             sb.Append("[");
             sb.Append(strTag);
             /// 不管是不是自定义数据，只要tostring能用就行
@@ -147,10 +199,17 @@ public static class ToLuaText
                 sb.Append("\n");
                 ++indent;
                 LuaSerialization serializor = item.Value as LuaSerialization;
-                serializor.Serialize(sb, indent);
+                if (serializor.Serialize(sb, indent))
+                {
+                    bSerializeSuc = true;
+                    sb.Append(",\n");
+                }
                 --indent;
-                sb.Append(",\n");
-                AppendIndent(sb, indent);
+
+                if (!bSerializeSuc)
+                    sb.Remove(tempValidContentLength, sb.Length - tempValidContentLength);
+                else
+                    AppendIndent(sb, indent);
             }
             else if (valueType.IsClass)
             {
@@ -160,6 +219,8 @@ public static class ToLuaText
                     sb.Append(item.Value.ToString().Replace("\n", @"\n").Replace("\"", @"\"""));
                     sb.Append("\"");
                     sb.Append(", ");
+
+                    bSerializeSuc = true;
                 }
                 else
                 {
@@ -175,10 +236,18 @@ public static class ToLuaText
                     {
                         sb.Append("\n");
                         ++indent;
-                        method.Invoke(null, new object[] { item.Value, sb, indent });
+                        bool bSeirializeResult = (bool)method.Invoke(null, new object[] { item.Value, sb, indent });
+                        if (bSeirializeResult)
+                        {
+                            bSerializeSuc = true;
+                            sb.Append(",\n");
+                        }
                         --indent;
-                        sb.Append(",\n");
-                        AppendIndent(sb, indent);
+
+                        if (!bSerializeSuc)
+                            sb.Remove(tempValidContentLength, sb.Length - tempValidContentLength);
+                        else
+                            AppendIndent(sb, indent);
                     }
                 }
             }
@@ -188,6 +257,8 @@ public static class ToLuaText
                 {
                     sb.Append(item.Value);
                     sb.Append(", ");
+
+                    bSerializeSuc = true;
                 }
                 else
                 {
@@ -196,8 +267,17 @@ public static class ToLuaText
             }
         }
 
-        sb.Append("\n");
-        AppendIndent(sb, indent - 1);
-        sb.Append("}");
+        if (!bSerializeSuc)
+        {
+            sb.Remove(validContentLength, sb.Length - validContentLength);
+        }
+        else
+        {
+            sb.Append("\n");
+            AppendIndent(sb, indent - 1);
+            sb.Append("}");
+        }
+
+        return bSerializeSuc;
     }
 }
