@@ -147,6 +147,7 @@ public static class ToLuaText
             }
             else
             {
+                Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine(string.Format("Can't Serialize Specify Data Type : {0} To Lua", type));
             }
         }
@@ -174,6 +175,15 @@ public static class ToLuaText
 
         if (dic.Count <= 0)
         {
+            bSerializeSuc = false;
+            sb.Remove(sb.Length - validContentLength, validContentLength);
+            return bSerializeSuc;
+        }
+
+        if (keyType == typeof(float) || keyType == typeof(double) || keyType == typeof(bool))
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine(string.Format("Can't Serialize Specify Data Type : {0} To Lua", keyType));
             bSerializeSuc = false;
             sb.Remove(sb.Length - validContentLength, validContentLength);
             return bSerializeSuc;
@@ -262,6 +272,7 @@ public static class ToLuaText
                 }
                 else
                 {
+                    Console.ForegroundColor = ConsoleColor.Red;
                     Console.WriteLine(string.Format("Can't Serialize Specify Data Type : {0} To Lua", valueType));
                 }
             }

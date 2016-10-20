@@ -17,14 +17,16 @@ namespace ExcelToLua
         const string arrayTagRegex = @"(?<=\[)(\d*)(?=\])";///match []、[number]
         const string dicTagRegex = @"(?<=\{)(\d*)(?=\})";///match {}、{number}
         const string tableTagRegex = @"(?<=\[)(\d*)(?=\])|(?<=\{)(\d*)(?=\})";/// match arrayTagRegex or dicTagRegex
+        const string columnTag = "|";
 
         int columnCount;
         string tableName;
-        TableNode tabelNodeRoot;
+        TableListNode<TableNode> tableColumnNodeList;
         List<string> tableCellDescList;
         List<string> tableCellNameList;
         List<string> tableCellTypeList;
         List<string> tableNestTagList;
+        List<int> columnsInfo;
         List<List<CellInfo>> rowsInfo;
         HashSet<CellInfo> conflictKeySet;
 
@@ -36,12 +38,13 @@ namespace ExcelToLua
             this.tableName = tableName;
             columnCount = configTagble.Columns.Count;
             int rowCount = configTagble.Rows.Count;
-            rowsInfo = new List<List<CellInfo>>(rowCount - cellNameRowIndex);
+            columnsInfo = new List<int>();
             conflictKeySet = new HashSet<CellInfo>();
             tableCellDescList = new List<string>(columnCount);
             tableCellNameList = new List<string>(columnCount);
             tableCellTypeList = new List<string>(columnCount);
             tableNestTagList = new List<string>(columnCount);
+            rowsInfo = new List<List<CellInfo>>(rowCount - cellNameRowIndex);
 
             for (int i = 0; i < columnCount; ++i)
             {
@@ -54,6 +57,11 @@ namespace ExcelToLua
                 tableCellNameList.Add(cellName);
                 tableCellTypeList.Add(cellType);
                 tableNestTagList.Add(nestTag);
+
+                if (string.CompareOrdinal(nestTag, columnTag) == 0)
+                {
+                    columnsInfo.Add(i);
+                }
 
                 for (int j = 0; j < rowCount; ++j)
                 {
@@ -73,7 +81,7 @@ namespace ExcelToLua
 
             try
             {
-                tabelNodeRoot = TabelHeirarchyIterator();
+                TabelHeirarchyIterator();
             }
             catch (Exception e)
             {
@@ -87,7 +95,18 @@ namespace ExcelToLua
             try
             {
                 sb.Append("return ");
-                return tabelNodeRoot.Serialize(sb, indent);
+
+                int firstEleColumnIndex = columnsInfo[0];
+                /// 如果默认没有采用列数据的话，就不再嵌套一层了
+                if (tableColumnNodeList.Count == 1)
+                {
+                    tableColumnNodeList[0].NestInArray();
+                    return tableColumnNodeList[0].Serialize(sb, indent);
+                }
+                else
+                {
+                    return tableColumnNodeList.Serialize(sb, indent);
+                }
             }
             catch (Exception e)
             {
@@ -105,11 +124,15 @@ namespace ExcelToLua
             bool bNodeCachedByList = true;
             bool bNodeCachedByArray = false;
             string firstNodeTag = tableNestTagList[enumColumnIndex];
+            string firstNodeType = tableCellTypeList[enumColumnIndex];
             endIndex = columnIndex;
 
-            FilterEmptyColumn(ref enumColumnIndex, tableCellTypeList[enumColumnIndex], firstNodeTag);
+            FilterEmptyColumn(ref enumColumnIndex, firstNodeType, firstNodeTag);
             if (!CacheNestTableType(enumColumnIndex, out bNodeCachedByList))
+            {
+                endIndex = columnIndex;
                 return null;
+            }
 
             var matchResult = Regex.Match(firstNodeTag, tableTagRegex);
             if (matchResult.Success)
@@ -137,17 +160,22 @@ namespace ExcelToLua
             {
                 subNode.NestInArray();
             }
-            else if (nestEleCount == 1)
+            else if (nestEleCount == 1 && Regex.IsMatch(firstNodeTag, dicTagRegex))
             {
                 subNode = new CellInfo(null, null, "bool", "true");
+                endIndex = enumColumnIndex;
                 return subNode;
             }
+
             curRowNode.Add(subNode);
             ++cachedEleCount;
             ++enumColumnIndex;
             if (enumColumnIndex >= columnCount || cachedEleCount >= nestEleCount)
             {
                 endIndex = enumColumnIndex;
+                if (string.CompareOrdinal(firstNodeTag, columnTag) == 0)
+                    return subNode;
+
                 return curRowNode;
             }
 
@@ -184,10 +212,12 @@ namespace ExcelToLua
                         subNode = tempDicNode;
                     }
                     subNode.Desc = tableCellDescList[enumColumnIndex];
+                    subNode.NestInTable(tableCellNameList[enumColumnIndex]);
                     enumColumnIndex = tempEndIndex;
                 }
                 else
                 {
+                    subNode.NestInTable(tableCellNameList[enumColumnIndex]);
                     ++enumColumnIndex;
                 }
 
@@ -196,7 +226,6 @@ namespace ExcelToLua
                 {
                     subNode.NestInArray();
                 }
-                subNode.NestInTable();
 
                 curRowNode.Add(subNode);
                 ++cachedEleCount;
@@ -211,39 +240,75 @@ namespace ExcelToLua
             return curRowNode;
         }
 
-        TableNode TabelHeirarchyIterator()
+        void TabelHeirarchyIterator()
         {
-            bool bUseArray = true;
             int startColumnIndex = 0;
+            string tempTag = tableNestTagList[startColumnIndex];
 
-            FilterEmptyColumn(ref startColumnIndex, tableCellTypeList[startColumnIndex], tableNestTagList[startColumnIndex]);
-            if (!CacheNestTableType(startColumnIndex, out bUseArray))
-                return null;
+            FilterEmptyColumn(ref startColumnIndex, tableCellTypeList[startColumnIndex], tempTag);
+            if (columnsInfo.Count == 0)
+                columnsInfo.Add(startColumnIndex);
 
-            int endIndex = 0;
-            if (bUseArray)
+            tableColumnNodeList = new TableListNode<TableNode>(columnsInfo.Count);
+
+            for (int i = 0, colLen = columnsInfo.Count; i < colLen; ++i)
             {
-                var curListNode = new TableListNode<TableNode>(rowsInfo.Count);
+                startColumnIndex = columnsInfo[i];
+                int endIndex = 0;
+                tempTag = tableNestTagList[startColumnIndex];
+                string columnName = tableCellNameList[startColumnIndex];
+                int nestColumnEleCount = i < colLen - 1 ? columnsInfo[i + 1] - startColumnIndex : columnCount - startColumnIndex;
 
-                for (int i = nestTagRowIndex + 1, len = rowsInfo.Count; i < len; ++i)
+                if (string.CompareOrdinal(tempTag, columnTag) == 0)
                 {
-                    curListNode.Add(RowHeirarchyIterator(startColumnIndex, i, columnCount, out endIndex));
+                    /// 默认不管该列配了多少个数据，只读一个数据，要读多行数据请在“行”中实现
+                    tableColumnNodeList.Add(RowHeirarchyIterator(startColumnIndex, nestTagRowIndex + 1, 1, out endIndex));
+                    ++startColumnIndex;
+                    --nestColumnEleCount;
+                    if (nestColumnEleCount <= 0)
+                        continue;
                 }
 
-                return curListNode;
-            }
-            else
-            {
-                var curDicNode = new TableDicNode<TableNode, TableNode>(rowsInfo.Count);
-                curDicNode.Desc = tableCellDescList[startColumnIndex];
+                bool bCacheByList = true;
+                if (!CacheNestTableType(startColumnIndex, out bCacheByList))
+                    return;
 
-                for (int i = nestTagRowIndex + 1, len = rowsInfo.Count; i < len; ++i)
+                if (bCacheByList)
                 {
-                    TableNode newNode = RowHeirarchyIterator(startColumnIndex, i, columnCount, out endIndex);
-                    AppendNewDicNode(curDicNode, rowsInfo[i][startColumnIndex], newNode);
-                }
+                    var curListNode = new TableListNode<TableNode>(rowsInfo.Count);
+                    int itorIndex = startColumnIndex;
 
-                return curDicNode;
+                    while (endIndex - startColumnIndex < nestColumnEleCount)
+                    {
+                        for (int j = nestTagRowIndex + 1, rowLen = rowsInfo.Count; j < rowLen; ++j)
+                        {
+                            curListNode.Add(RowHeirarchyIterator(itorIndex, j, nestColumnEleCount, out endIndex));
+                        }
+                        ++itorIndex;
+                    }
+
+                    curListNode.NestInTable(columnName);
+                    tableColumnNodeList.Add(curListNode);
+                }
+                else
+                {
+                    var curDicNode = new TableDicNode<TableNode, TableNode>(rowsInfo.Count);
+                    curDicNode.Desc = tableCellDescList[startColumnIndex];
+                    int itorIndex = startColumnIndex;
+
+                    while (endIndex - startColumnIndex < nestColumnEleCount)
+                    {
+                        for (int j = nestTagRowIndex + 1, rowLen = rowsInfo.Count; j < rowLen; ++j)
+                        {
+                            TableNode newNode = RowHeirarchyIterator(itorIndex, j, nestColumnEleCount, out endIndex);
+                            AppendNewDicNode(curDicNode, rowsInfo[j][itorIndex], newNode);
+                        }
+                        ++itorIndex;
+                    }
+
+                    curDicNode.NestInTable(columnName);
+                    tableColumnNodeList.Add(curDicNode);
+                }
             }
         }
 
@@ -265,17 +330,17 @@ namespace ExcelToLua
             }
         }
 
-        bool CacheNestTableType(int checkColumnIndex, out bool bUseArray)
+        bool CacheNestTableType(int checkColumnIndex, out bool bCacheByList)
         {
-            bUseArray = true;
+            bCacheByList = true;
             string tempTag = tableNestTagList[checkColumnIndex];
-            if (Regex.IsMatch(tempTag, arrayTagRegex))
+            if (Regex.IsMatch(tempTag, arrayTagRegex) || string.CompareOrdinal(tempTag, columnTag) == 0)
             {
-                bUseArray = true;
+                bCacheByList = true;
             }
             else if (Regex.IsMatch(tempTag, dicTagRegex))
             {
-                bUseArray = false;
+                bCacheByList = false;
                 if (string.IsNullOrEmpty(tableCellTypeList[checkColumnIndex]))
                 {
                     Console.ForegroundColor = ConsoleColor.Red;
@@ -321,7 +386,7 @@ namespace ExcelToLua
         string Desc { get; set; }
 
         void NestInArray();
-        void NestInTable();
+        void NestInTable(string keyNameInNestedTable);
     }
 
     public class TableListNode<T> : List<T>, TableNode
@@ -329,6 +394,7 @@ namespace ExcelToLua
     {
         bool bNestInTable;
         bool bNestInArray;
+        string strKeyNameInNestedTable;
 
         public string Desc { get; set; }
 
@@ -352,9 +418,10 @@ namespace ExcelToLua
             //itor.Dispose();
         }
 
-        public void NestInTable()
+        public void NestInTable(string keyNameInNestedTable)
         {
             bNestInTable = true;
+            strKeyNameInNestedTable = keyNameInNestedTable;
         }
 
         public bool Serialize(StringBuilder sb, int indent)
@@ -362,11 +429,10 @@ namespace ExcelToLua
             bool bSerializeSuc = false;
             int validContentLength = sb.Length;
 
-            if (bNestInTable && !bNestInArray)
+            if (bNestInTable && !bNestInArray && !string.IsNullOrEmpty(strKeyNameInNestedTable))
             {
-                CellInfo firstEle = this[0] as CellInfo;
                 ToLuaText.AppendIndent(sb, indent);
-                sb.Append(firstEle.Name);
+                sb.Append(strKeyNameInNestedTable);
                 sb.Append(" = \n");
             }
 
@@ -399,6 +465,7 @@ namespace ExcelToLua
     {
         bool bNestInArray;
         bool bNestInTable;
+        string strKeyNameInNestedTable;
 
         public string Desc { get; set; }
 
@@ -412,9 +479,10 @@ namespace ExcelToLua
             bNestInArray = true;
         }
 
-        public void NestInTable()
+        public void NestInTable(string keyNameInNestedTable)
         {
             bNestInTable = true;
+            strKeyNameInNestedTable = keyNameInNestedTable;
         }
 
         public bool Serialize(StringBuilder sb, int indent)
@@ -422,13 +490,10 @@ namespace ExcelToLua
             bool bSerializeSuc = false;
             int validContentLength = sb.Length;
 
-            if (bNestInTable && !bNestInArray)
+            if (bNestInTable && !bNestInArray && !string.IsNullOrEmpty(strKeyNameInNestedTable))
             {
-                var itor = GetEnumerator();
-                itor.MoveNext();
-                CellInfo firstEle = itor.Current.Key as CellInfo;
                 ToLuaText.AppendIndent(sb, indent);
-                sb.Append(firstEle.Name);
+                sb.Append(strKeyNameInNestedTable);
                 sb.Append(" = \n");
             }
 
@@ -460,21 +525,21 @@ namespace ExcelToLua
 
     public class CellInfo : TableNode
     {
+        const string cellArrayTag = "|";
+
         bool bNestInArray;
         bool bNestInTable;
         bool bContainsArray;
-        string originalData;
-        string keyName;
         string cellTag;
+        string originalData;
+        string strKeyNameInNestedTable;
         Type cellType;
 
         public string Desc { get; set; }
 
-        public string Name { get { return keyName; } }
-
         public CellInfo(string cellTag, string name, string type, string data)
         {
-            this.keyName = name;
+            strKeyNameInNestedTable = name;
             this.cellTag = cellTag;
             originalData = data;
 
@@ -501,7 +566,7 @@ namespace ExcelToLua
                     break;
             }
 
-            if (originalData.Contains("|"))
+            if (originalData.Contains(cellArrayTag))
             {
                 bContainsArray = true;
             }
@@ -517,9 +582,10 @@ namespace ExcelToLua
             }
         }
 
-        public void NestInTable()
+        public void NestInTable(string keyNameInNestedTable)
         {
             bNestInTable = true;
+            strKeyNameInNestedTable = !string.IsNullOrEmpty(keyNameInNestedTable) ? keyNameInNestedTable : strKeyNameInNestedTable;
         }
 
         public override string ToString()
@@ -565,8 +631,10 @@ namespace ExcelToLua
         {
             bool bSerializeSuc = false;
 
-            if ((cellType == null && string.IsNullOrEmpty(keyName))
-                || (string.IsNullOrEmpty(originalData)/* && string.IsNullOrEmpty(cellTag)*/))
+            if (string.IsNullOrEmpty(originalData)
+                || (string.IsNullOrEmpty(strKeyNameInNestedTable) 
+                    && (cellType == null || !bNestInArray))
+                /* && string.CompareOrdinal(cellTag, cellArrayTag) != 0*/)
             {
                 return bSerializeSuc;
             }
@@ -587,18 +655,18 @@ namespace ExcelToLua
 
             bool keyNameSerialized = false;
             if ((!bContainsArray || bNestInTable)
-                && (!bNestInArray && !string.IsNullOrEmpty(keyName)))
+                && (!bNestInArray && !string.IsNullOrEmpty(strKeyNameInNestedTable)))
             {
                 keyNameSerialized = true;
                 ToLuaText.AppendIndent(sb, indent);
-                sb.Append(keyName);
+                sb.Append(strKeyNameInNestedTable);
                 sb.Append(" = ");
             }
 
             string dataFormat = cellType == typeof(string) ? "\"{0}\"" : "{0}";
-            if (originalData.Contains("|"))
+            if (originalData.Contains(cellArrayTag))
             {
-                var tempStringArray = originalData.Split('|');
+                var tempStringArray = originalData.Split(cellArrayTag[0]);
                 MethodInfo convertArrayDataGenericMethod = typeof(CellInfo).GetMethod("ConvertArrayData", BindingFlags.NonPublic | BindingFlags.Instance);
                 var convertMethod = convertArrayDataGenericMethod.MakeGenericMethod(new Type[] { cellType });
                 var transferMethod = ToLuaText.MakeGenericArrayTransferMethod(cellType);
@@ -650,12 +718,12 @@ namespace ExcelToLua
             return bSerializeSuc;
         }
 
-        public static object DefaultValueForType(Type targetType)
+        static object DefaultValueForType(Type targetType)
         {
             if (targetType == null)
-                return "nil";
+                return "";
 
-            return targetType.IsValueType ? Activator.CreateInstance(targetType) : null;
+            return targetType.IsValueType ? Activator.CreateInstance(targetType) : "";
         }
 
         T[] ConvertArrayData<T>(string[] stringData)
