@@ -23,7 +23,7 @@ namespace ExcelToLua
             catch (Exception e)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine(string.Format("打开文件 {0} 失败", filePath));
+                Console.WriteLine(string.Format("打开文件 {0} 失败", Path.GetFileNameWithoutExtension(filePath)));
                 return null;
             }
             finally
@@ -55,6 +55,7 @@ namespace ExcelToLua
             catch (Exception e)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine(string.Format("打开文件 {0} 失败", Path.GetFileNameWithoutExtension(filePath)));
                 Console.WriteLine(e.ToString());
                 return null;
             }

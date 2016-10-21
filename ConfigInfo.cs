@@ -116,7 +116,7 @@ namespace ExcelToLua
             }
         }
 
-        TableNode RowHeirarchyIterator(int columnIndex, int rowIndex, int nestEleCount, out int endIndex)
+        TableNode RowHeirarchyIterator(int columnIndex, int rowIndex, int nestEleCount, ref int endIndex)
         {
             var curRowNode = new TableListNode<TableNode>(columnCount - columnIndex);
             int enumColumnIndex = columnIndex;
@@ -125,12 +125,11 @@ namespace ExcelToLua
             bool bNodeCachedByArray = false;
             string firstNodeTag = tableNestTagList[enumColumnIndex];
             string firstNodeType = tableCellTypeList[enumColumnIndex];
-            endIndex = columnIndex;
 
             FilterEmptyColumn(ref enumColumnIndex, firstNodeType, firstNodeTag);
             if (!CacheNestTableType(enumColumnIndex, out bNodeCachedByList))
             {
-                endIndex = columnIndex;
+                endIndex = enumColumnIndex;
                 return null;
             }
 
@@ -170,7 +169,7 @@ namespace ExcelToLua
             curRowNode.Add(subNode);
             ++cachedEleCount;
             ++enumColumnIndex;
-            if (enumColumnIndex >= columnCount || cachedEleCount >= nestEleCount)
+            if (enumColumnIndex >= endIndex || enumColumnIndex >= columnCount || cachedEleCount >= nestEleCount)
             {
                 endIndex = enumColumnIndex;
                 if (string.CompareOrdinal(firstNodeTag, columnTag) == 0)
@@ -203,8 +202,8 @@ namespace ExcelToLua
                         return null;
                     }
 
-                    int tempEndIndex = enumColumnIndex;
-                    subNode = RowHeirarchyIterator(enumColumnIndex, rowIndex, subNestEleCount, out tempEndIndex);
+                    int tempEndIndex = endIndex;
+                    subNode = RowHeirarchyIterator(enumColumnIndex, rowIndex, subNestEleCount, ref tempEndIndex);
                     if (Regex.IsMatch(cellTag, dicTagRegex))
                     {
                         var tempDicNode = new TableDicNode<CellInfo, TableNode>(1);
@@ -230,7 +229,7 @@ namespace ExcelToLua
                 curRowNode.Add(subNode);
                 ++cachedEleCount;
 
-                if (enumColumnIndex >= columnCount || cachedEleCount >= nestEleCount)
+                if (enumColumnIndex >= endIndex || enumColumnIndex >= columnCount || cachedEleCount >= nestEleCount)
                 {
                     endIndex = enumColumnIndex;
                     break;
@@ -243,6 +242,7 @@ namespace ExcelToLua
         void TabelHeirarchyIterator()
         {
             int startColumnIndex = 0;
+            int endIndex = columnCount - 1;
             string tempTag = tableNestTagList[startColumnIndex];
 
             FilterEmptyColumn(ref startColumnIndex, tableCellTypeList[startColumnIndex], tempTag);
@@ -254,7 +254,6 @@ namespace ExcelToLua
             for (int i = 0, colLen = columnsInfo.Count; i < colLen; ++i)
             {
                 startColumnIndex = columnsInfo[i];
-                int endIndex = 0;
                 tempTag = tableNestTagList[startColumnIndex];
                 string columnName = tableCellNameList[startColumnIndex];
                 int nestColumnEleCount = i < colLen - 1 ? columnsInfo[i + 1] - startColumnIndex : columnCount - startColumnIndex;
@@ -262,7 +261,7 @@ namespace ExcelToLua
                 if (string.CompareOrdinal(tempTag, columnTag) == 0)
                 {
                     /// 默认不管该列配了多少个数据，只读一个数据，要读多行数据请在“行”中实现
-                    tableColumnNodeList.Add(RowHeirarchyIterator(startColumnIndex, nestTagRowIndex + 1, 1, out endIndex));
+                    tableColumnNodeList.Add(RowHeirarchyIterator(startColumnIndex, nestTagRowIndex + 1, 1, ref endIndex));
                     ++startColumnIndex;
                     --nestColumnEleCount;
                     if (nestColumnEleCount <= 0)
@@ -273,19 +272,25 @@ namespace ExcelToLua
                 if (!CacheNestTableType(startColumnIndex, out bCacheByList))
                     return;
 
+                endIndex = nestColumnEleCount + startColumnIndex;
+                int itorIndex = startColumnIndex;
+
                 if (bCacheByList)
                 {
                     var curListNode = new TableListNode<TableNode>(rowsInfo.Count);
-                    int itorIndex = startColumnIndex;
 
-                    while (endIndex - startColumnIndex < nestColumnEleCount)
+                    do
                     {
                         for (int j = nestTagRowIndex + 1, rowLen = rowsInfo.Count; j < rowLen; ++j)
                         {
-                            curListNode.Add(RowHeirarchyIterator(itorIndex, j, nestColumnEleCount, out endIndex));
+                            curListNode.Add(RowHeirarchyIterator(itorIndex, j, nestColumnEleCount, ref endIndex));
                         }
-                        ++itorIndex;
+                        itorIndex = endIndex;
+
+                        if (itorIndex >= columnCount)
+                            break;
                     }
+                    while (endIndex - startColumnIndex < nestColumnEleCount);
 
                     curListNode.NestInTable(columnName);
                     tableColumnNodeList.Add(curListNode);
@@ -294,17 +299,20 @@ namespace ExcelToLua
                 {
                     var curDicNode = new TableDicNode<TableNode, TableNode>(rowsInfo.Count);
                     curDicNode.Desc = tableCellDescList[startColumnIndex];
-                    int itorIndex = startColumnIndex;
 
-                    while (endIndex - startColumnIndex < nestColumnEleCount)
+                    do
                     {
                         for (int j = nestTagRowIndex + 1, rowLen = rowsInfo.Count; j < rowLen; ++j)
                         {
-                            TableNode newNode = RowHeirarchyIterator(itorIndex, j, nestColumnEleCount, out endIndex);
+                            TableNode newNode = RowHeirarchyIterator(itorIndex, j, nestColumnEleCount, ref endIndex);
                             AppendNewDicNode(curDicNode, rowsInfo[j][itorIndex], newNode);
                         }
-                        ++itorIndex;
+                        itorIndex = endIndex;
+
+                        if (itorIndex >= columnCount)
+                            break;
                     }
+                    while (endIndex - startColumnIndex < nestColumnEleCount);
 
                     curDicNode.NestInTable(columnName);
                     tableColumnNodeList.Add(curDicNode);
