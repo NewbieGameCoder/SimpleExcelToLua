@@ -66,7 +66,7 @@ namespace ExcelToLua
                 for (int j = 0; j < rowCount; ++j)
                 {
                     string data = configTagble.Rows[j][i].ToString();
-                    CellInfo tempCellInfo = new CellInfo(nestTag, cellName, cellType, data);
+                    CellInfo tempCellInfo = new CellInfo(string.CompareOrdinal(nestTag, columnTag) == 0, nestTag, cellName, cellType, data);
                     tempCellInfo.Desc = cellDesc;
 
                     if (j >= rowsInfo.Count)
@@ -94,10 +94,9 @@ namespace ExcelToLua
         {
             try
             {
-                sb.Append("return ");
+                bool bSerializedSuc = false;
 
-                int firstEleColumnIndex = columnsInfo[0];
-                /// 如果默认没有采用列数据的话，就不再嵌套一层了
+                sb.Append("return ");
                 if (tableColumnNodeList.Count == 1)
                 {
                     tableColumnNodeList[0].NestInArray();
@@ -105,8 +104,34 @@ namespace ExcelToLua
                 }
                 else
                 {
-                    return tableColumnNodeList.Serialize(sb, indent);
+                    sb.Append("\n{\n");
                 }
+
+                ToLuaText.AppendIndent(sb, indent);
+                for (int i = 0, len = tableColumnNodeList.Count; i < len; ++i)
+                {
+                    int tempValidContentLength = sb.Length;
+
+                    ++indent;
+                    if (tableColumnNodeList[i].Serialize(sb, indent))
+                    {
+                        bSerializedSuc = true;
+                        sb.Append(",\n");
+                    }
+                    --indent;
+
+                    if (bSerializedSuc)
+                        ToLuaText.AppendIndent(sb, indent);
+                    else
+                        sb.Remove(tempValidContentLength, sb.Length - tempValidContentLength);
+                }
+
+                if (tableColumnNodeList.Count > 1)
+                {
+                    sb.Append("}");
+                }
+
+                return bSerializedSuc;
             }
             catch (Exception e)
             {
@@ -124,12 +149,10 @@ namespace ExcelToLua
             bool bNodeCachedByList = true;
             bool bNodeCachedByArray = false;
             string firstNodeTag = tableNestTagList[enumColumnIndex];
-            string firstNodeType = tableCellTypeList[enumColumnIndex];
 
-            FilterEmptyColumn(ref enumColumnIndex, firstNodeType, firstNodeTag);
-            if (!CacheNestTableType(enumColumnIndex, out bNodeCachedByList))
+            if (!FilterEmptyColumn(ref enumColumnIndex) || !CacheNestTableType(enumColumnIndex, out bNodeCachedByList))
             {
-                endIndex = enumColumnIndex;
+                endIndex = ++enumColumnIndex;
                 return null;
             }
 
@@ -161,12 +184,15 @@ namespace ExcelToLua
             }
             else if (nestEleCount == 1 && Regex.IsMatch(firstNodeTag, dicTagRegex))
             {
-                subNode = new CellInfo(null, null, "bool", "true");
+                subNode = new CellInfo(false, null, null, "bool", "true");
                 endIndex = enumColumnIndex;
                 return subNode;
             }
 
-            curRowNode.Add(subNode);
+            if (!Regex.IsMatch(firstNodeTag, dicTagRegex))
+            {
+                curRowNode.Add(subNode);
+            }
             ++cachedEleCount;
             ++enumColumnIndex;
             if (enumColumnIndex >= endIndex || enumColumnIndex >= columnCount || cachedEleCount >= nestEleCount)
@@ -198,7 +224,7 @@ namespace ExcelToLua
                     {
                         Console.ForegroundColor = ConsoleColor.Red;
                         Console.WriteLine(string.Format("{0} 第{1}列的集合长度序列化失败", tableName, enumColumnIndex));
-                        endIndex = enumColumnIndex;
+                        endIndex = ++enumColumnIndex;
                         return null;
                     }
 
@@ -243,13 +269,13 @@ namespace ExcelToLua
         {
             int startColumnIndex = 0;
             int endIndex = columnCount - 1;
-            string tempTag = tableNestTagList[startColumnIndex];
 
-            FilterEmptyColumn(ref startColumnIndex, tableCellTypeList[startColumnIndex], tempTag);
+            FilterEmptyColumn(ref startColumnIndex);
             if (columnsInfo.Count == 0)
                 columnsInfo.Add(startColumnIndex);
 
             tableColumnNodeList = new TableListNode<TableNode>(columnsInfo.Count);
+            string tempTag = tableNestTagList[startColumnIndex];
 
             for (int i = 0, colLen = columnsInfo.Count; i < colLen; ++i)
             {
@@ -320,8 +346,11 @@ namespace ExcelToLua
             }
         }
 
-        void FilterEmptyColumn(ref int startColumnIndex, string cellType, string cellTag)
+        bool FilterEmptyColumn(ref int startColumnIndex)
         {
+            string cellType = tableNestTagList[startColumnIndex];
+            string cellTag = tableNestTagList[startColumnIndex];
+
             while (string.IsNullOrEmpty(cellType) && string.IsNullOrEmpty(cellTag))
             {
                 if (startColumnIndex >= columnCount)
@@ -329,13 +358,16 @@ namespace ExcelToLua
                     Console.ForegroundColor = ConsoleColor.Red;
                     Console.WriteLine(string.Format("{0} 空列过多，导致序列化失败", tableName));
                     --startColumnIndex;
-                    return;
+                    return false;
                 }
 
-                ++startColumnIndex;
                 cellType = tableNestTagList[startColumnIndex];
                 cellTag = tableNestTagList[startColumnIndex];
+
+                ++startColumnIndex;
             }
+
+            return true;
         }
 
         bool CacheNestTableType(int checkColumnIndex, out bool bCacheByList)
@@ -362,6 +394,9 @@ namespace ExcelToLua
 
         void AppendNewDicNode(TableDicNode<TableNode, TableNode> dicCollection, CellInfo key, TableNode value)
         {
+            if (value == null)
+                return;
+
             TableNode existNode = null;
             if (!dicCollection.TryGetValue(key, out existNode))
             {
@@ -538,6 +573,7 @@ namespace ExcelToLua
         bool bNestInArray;
         bool bNestInTable;
         bool bContainsArray;
+        bool bAlwaysShowKeyName;
         string cellTag;
         string originalData;
         string strKeyNameInNestedTable;
@@ -545,10 +581,11 @@ namespace ExcelToLua
 
         public string Desc { get; set; }
 
-        public CellInfo(string cellTag, string name, string type, string data)
+        public CellInfo(bool bAlwaysShowKeyName, string cellTag, string name, string type, string data)
         {
             strKeyNameInNestedTable = name;
             this.cellTag = cellTag;
+            this.bAlwaysShowKeyName = bAlwaysShowKeyName;
             originalData = data;
 
             switch (type)
@@ -584,7 +621,7 @@ namespace ExcelToLua
         {
             bNestInArray = true;
 
-            if (string.IsNullOrEmpty(originalData) && cellType != null)
+            if (string.IsNullOrEmpty(originalData) && cellType != null && cellTag == null)
             {
                 originalData = DefaultValueForType(cellType).ToString();
             }
@@ -640,7 +677,7 @@ namespace ExcelToLua
             bool bSerializeSuc = false;
 
             if (string.IsNullOrEmpty(originalData)
-                || (string.IsNullOrEmpty(strKeyNameInNestedTable) 
+                || (string.IsNullOrEmpty(strKeyNameInNestedTable)
                     && (cellType == null || !bNestInArray))
                 /* && string.CompareOrdinal(cellTag, cellArrayTag) != 0*/)
             {
@@ -662,8 +699,9 @@ namespace ExcelToLua
             }
 
             bool keyNameSerialized = false;
-            if ((!bContainsArray || bNestInTable)
-                && (!bNestInArray && !string.IsNullOrEmpty(strKeyNameInNestedTable)))
+            if ((!bContainsArray || bNestInTable || bAlwaysShowKeyName)
+                && ((!bNestInArray || bAlwaysShowKeyName) 
+                    && !string.IsNullOrEmpty(strKeyNameInNestedTable)))
             {
                 keyNameSerialized = true;
                 ToLuaText.AppendIndent(sb, indent);
