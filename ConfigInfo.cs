@@ -691,9 +691,7 @@ namespace ExcelToLua
             bool bShowKeyName = (bNestInTable && !bNestInArray) || bColumnHead;
 
             if (bCellInValid && !bColumnHead)
-            {
                 return bSerializeSuc;
-            }
 
             ToLuaText.AppendIndent(sb, indent);
             if (bShowKeyName && !string.IsNullOrEmpty(strKeyNameInNestedTable))
