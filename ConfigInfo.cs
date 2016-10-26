@@ -207,8 +207,7 @@ namespace ExcelToLua
                     int tempEndIndex = endIndex;
                     if (subNestEleCount > 1)
                     {
-                        subNestEleCount = Math.Min(maxNestColumnCount - 1, subNestEleCount);
-                        subNode = RowHeirarchyIterator(enumColumnIndex, rowIndex, subNestEleCount, ref tempEndIndex);
+                        subNode = RowHeirarchyIterator(enumColumnIndex, rowIndex, maxNestColumnCount - 1, ref tempEndIndex);
                     }
                     else
                     {
