@@ -15,19 +15,18 @@ namespace ExcelToLua
                 Directory.CreateDirectory(path);
             }
         }
-
-        static void Main(string[] args)
+        
+        static void ClearDirectory(string filePath)
         {
-            string excelFolderPath = Path.GetFullPath("Excel");
-            string luaFolderPath = Path.GetFullPath("Lua");
-            FileDirectoryEnsurance(excelFolderPath);
-            FileDirectoryEnsurance(luaFolderPath);
-
-            var existLuaFiles = Directory.GetFiles(luaFolderPath, "*.*");
-            for (int i = 0; i < existLuaFiles.Length; ++i)
+            var existFiles = Directory.GetFiles(filePath, "*.*");
+            for (int i = 0; i < existFiles.Length; ++i)
             {
-                File.Delete(existLuaFiles[i]);
+                File.Delete(existFiles[i]);
             }
+        }
+
+        static void CopyNonExcelFiles(string excelFolderPath, string clientLuaFolderPath, string serverLuaFolderPath)
+        {
             var copyingExtraFiles = Directory.GetFiles(excelFolderPath, "*.*", SearchOption.AllDirectories);
             for (int i = 0; i < copyingExtraFiles.Length; ++i)
             {
@@ -35,8 +34,23 @@ namespace ExcelToLua
                 if (Path.GetExtension(copyingExtraFiles[i]) == ".xlsx")
                     continue;
 
-                File.Copy(copyingExtraFiles[i], luaFolderPath + "/" + fileName, true);
+                File.Copy(copyingExtraFiles[i], serverLuaFolderPath + "/" + fileName, true);
+                File.Copy(copyingExtraFiles[i], clientLuaFolderPath + "/" + fileName, true);
             }
+        }
+
+        static void Main(string[] args)
+        {
+            string excelFolderPath = Path.GetFullPath("Excel");
+            string serverLuaFolderPath = Path.GetFullPath("ServerLua");
+            string clientLuaFolderPath = Path.GetFullPath("ClientLua");
+
+            FileDirectoryEnsurance(excelFolderPath);
+            FileDirectoryEnsurance(serverLuaFolderPath);
+            FileDirectoryEnsurance(clientLuaFolderPath);
+            ClearDirectory(serverLuaFolderPath);
+            ClearDirectory(clientLuaFolderPath);
+            CopyNonExcelFiles(excelFolderPath, clientLuaFolderPath, serverLuaFolderPath);
 
             string[] excelFiles = Directory.GetFiles(excelFolderPath, "*.xlsx");
             if (excelFiles == null || excelFiles.Length == 0)
@@ -60,9 +74,8 @@ namespace ExcelToLua
                 Console.ForegroundColor = ConsoleColor.White;
                 Console.WriteLine(string.Format("开始转换表 {0}", fileName));
                 luaConfigFileInfo.Serialize(sb, 0);
-                File.WriteAllText(luaFolderPath + "/" + fileName + ".lua", sb.ToString(), new UTF8Encoding(false));
-                Console.ForegroundColor = ConsoleColor.White;
-                Console.WriteLine(string.Format("转换表 {0} 完毕", fileName));
+                File.WriteAllText(serverLuaFolderPath + "/" + fileName + ".lua", sb.ToString(), new UTF8Encoding(false));
+                File.WriteAllText(clientLuaFolderPath + "/" + fileName + ".lua", sb.ToString(), new UTF8Encoding(false));
             }
 
             Console.ForegroundColor = ConsoleColor.White;

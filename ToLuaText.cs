@@ -1,10 +1,7 @@
 ﻿using System;
-using System.IO;
 using System.Text;
 using System.Reflection;
-using System.Collections;
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
 
 public interface LuaSerialization
 {
@@ -16,6 +13,7 @@ public static class ToLuaText
 {
     static Type listTypeDefinition = typeof(List<>);
     static Type dictionaryTypeDefinition = typeof(Dictionary<,>);
+    static MethodInfo customTransferGenericMethod;
     static MethodInfo listTransferGenericMethod;
     static MethodInfo arrayTransferGenericMethod;
     static MethodInfo dictionaryTransferGenericMethod;
@@ -23,9 +21,81 @@ public static class ToLuaText
     static ToLuaText()
     {
         var classType = typeof(ToLuaText);
+        customTransferGenericMethod = classType.GetMethod("TransferCustomData", BindingFlags.Static | BindingFlags.NonPublic);
         listTransferGenericMethod = classType.GetMethod("TransferList");
         arrayTransferGenericMethod = classType.GetMethod("TransferArray");
         dictionaryTransferGenericMethod = classType.GetMethod("TransferDic");
+    }
+
+    public static bool TransferList<T>(List<T> list, StringBuilder sb, int indent = 0)
+    {
+        return TransferArray<T>(list.ToArray(), sb, indent);
+    }
+
+    public static bool TransferArray<T>(T[] array, StringBuilder sb, int indent = 0)
+    {
+        bool bSerializeSuc = false;
+        int validContentLength = sb.Length;
+
+        NestBegin(sb, indent);
+
+        if (array.Length <= 0)
+        {
+            bSerializeSuc = false;
+            WipeInvalidContent(sb, validContentLength);
+            return bSerializeSuc;
+        }
+
+        foreach (var item in array)
+        {
+            if (SerializeData(sb, indent, item))
+                bSerializeSuc = true;
+        }
+
+        if (bSerializeSuc)
+            NestEnd(sb, indent);
+        else
+            WipeInvalidContent(sb, validContentLength);
+
+        return bSerializeSuc;
+    }
+
+    public static bool TransferDic<T, U>(Dictionary<T, U> dic, StringBuilder sb, int indent = 0)
+    {
+        var keyType = typeof(T);
+        bool bSerializeSuc = false;
+        int validContentLength = sb.Length;
+
+        NestBegin(sb, indent);
+
+        if (dic.Count <= 0/* || !IsDataTypeSerializable(keyType)*/)
+        {
+            bSerializeSuc = false;
+            WipeInvalidContent(sb, validContentLength);
+            return bSerializeSuc;
+        }
+
+        string keyDataFormat = keyType == typeof(string) ? "[\"{0}\"] = " : "[{0}] = ";
+
+        ++indent;
+        foreach (var item in dic)
+        {
+            sb.Append("\n");
+            AppendIndent(sb, indent);
+            /// 不管是不是自定义数据，只要tostring能用就行
+            sb.AppendFormat(keyDataFormat, item.Key);
+
+            if (SerializeData(sb, indent, item.Value))
+                bSerializeSuc = true;
+        }
+        --indent;
+
+        if (bSerializeSuc)
+            NestEnd(sb, indent);
+        else
+            WipeInvalidContent(sb, validContentLength);
+
+        return bSerializeSuc;
     }
 
     public static MethodInfo MakeGenericArrayTransferMethod(Type type)
@@ -36,259 +106,127 @@ public static class ToLuaText
     public static void AppendIndent(StringBuilder sb, int indent)
     {
         for (int i = 0; i < indent; ++i)
-        {
             sb.Append("\t");
-        }
     }
 
-    public static bool TransferList<T>(List<T> list, StringBuilder sb, int indent = 0)
+    public static void WipeInvalidContent(StringBuilder sb, int validLength)
     {
-        return TransferArray<T>(list.ToArray(), sb, indent);
+        sb.Remove(validLength, sb.Length - validLength);
     }
 
-    public static bool TransferArray<T>(T[] array, StringBuilder sb, int indent = 0)
+    static bool TransferCustomData<T>(T data, StringBuilder sb, int indent = 0) where T : LuaSerialization
     {
-        int validContentLength = sb.Length;
-        AppendIndent(sb, indent);
-        sb.Append("{");
-        var type = typeof(T);
+        LuaSerialization serializor = data as LuaSerialization;
+        return serializor.Serialize(sb, indent);
+    }
+
+    static bool SerializeNestData<T>(StringBuilder sb, int indent, T data, MethodInfo transferMethod)
+    {
         bool bSerializeSuc = false;
+        int validContentLength = sb.Length;
 
-        if (array.Length <= 0)
+        if (transferMethod != null)
         {
-            bSerializeSuc = false;
-            sb.Remove(sb.Length - validContentLength, validContentLength);
-            return bSerializeSuc;
-        }
-
-        if (typeof(LuaSerialization).IsAssignableFrom(type))
-        {
-            int tempValidContentLength = sb.Length;
-
             ++indent;
             sb.Append("\n");
-            Array.ForEach<T>(array, (value) =>
+            bSerializeSuc = (bool)transferMethod.Invoke(null, new object[] { data, sb, indent });
+            if (bSerializeSuc)
             {
-                LuaSerialization serializor = value as LuaSerialization;
-                if (serializor.Serialize(sb, indent))
-                {
-                    bSerializeSuc = true;
-                    sb.Append(",\n");
-                }
-            });
+                sb.Append(",");
+            }
             --indent;
 
             if (!bSerializeSuc)
-                sb.Remove(tempValidContentLength, sb.Length - tempValidContentLength);
-            else
-                AppendIndent(sb, indent);
+                WipeInvalidContent(sb, validContentLength);
         }
-        else if (type.IsClass)
+
+        return bSerializeSuc;
+    }
+
+    static bool SerializeData<T>(StringBuilder sb, int indent, T Data)
+    {
+        Type dataType = typeof(T);
+        bool bSerializeSuc = false;
+
+        if (dataType.IsValueType)
         {
-            if (type == typeof(string))
+            if (dataType.IsPrimitive)
             {
-                --indent;
-                Array.ForEach<T>(array, (value) =>
-                {
-                    sb.Append("\"");
-                    sb.Append(value.ToString().Replace("\n", @"\n").Replace("\"", @"\"""));
-                    sb.Append("\"");
-                    sb.Append(", ");
-                });
-                --indent;
-
-                bSerializeSuc = true;
-            }
-            else
-            {
-                MethodInfo method = null;
-                if (type.GetGenericTypeDefinition() == dictionaryTypeDefinition)
-                    method = dictionaryTransferGenericMethod.MakeGenericMethod(type.GetGenericArguments());
-                else if (type.GetGenericTypeDefinition() == listTypeDefinition)
-                    method = listTransferGenericMethod.MakeGenericMethod(type.GetGenericArguments());
-                else if (type.IsArray)
-                    method = arrayTransferGenericMethod.MakeGenericMethod(new Type[] { type.GetElementType() });
-
-                if (method != null)
-                {
-                    int tempValidContentLength = sb.Length;
-
-                    ++indent;
-                    sb.Append("\n");
-                    Array.ForEach<T>(array, (value) =>
-                    {
-                        bool bSeirializeResult = (bool)method.Invoke(null, new object[] { value, sb, indent });
-                        if (bSeirializeResult)
-                        {
-                            bSerializeSuc = true;
-                            sb.Append(",\n");
-                        }
-                    });
-                    --indent;
-
-                    if (!bSerializeSuc)
-                        sb.Remove(tempValidContentLength, sb.Length - tempValidContentLength);
-                    else
-                        AppendIndent(sb, indent);
-                }
-            }
-        }
-        else if (type.IsValueType)
-        {
-            if (type.IsPrimitive)
-            {
-                Array.ForEach<T>(array, (value) =>
-                {
-                    sb.Append(value);
-                    sb.Append(", ");
-                });
-
+                AppendNonStringValue(sb, Data.ToString());
                 bSerializeSuc = true;
             }
             else
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine(string.Format("Can't Serialize Specify Data Type : {0} To Lua", type));
+                Console.WriteLine(string.Format("Can't Serialize Specify Data Type : {0} To Lua", dataType));
             }
-        }
-
-        if (!bSerializeSuc)
-        {
-            sb.Remove(validContentLength, sb.Length - validContentLength);
         }
         else
         {
-            sb.Append("}");
+            if (dataType != typeof(string))
+            {
+                MethodInfo nestEleTranferMethod = GetCollectionTransferMethod(dataType);
+                bSerializeSuc = SerializeNestData(sb, indent, Data, nestEleTranferMethod);
+            }
+            else
+            {
+                AppendStringValue(sb, Data.ToString());
+                bSerializeSuc = true;
+            }
         }
 
         return bSerializeSuc;
     }
 
-    public static bool TransferDic<T, U>(Dictionary<T, U> dic, StringBuilder sb, int indent = 0)
+    static MethodInfo GetCollectionTransferMethod(Type collectionType)
     {
-        int validContentLength = sb.Length;
+        MethodInfo method = null;
+
+        if (typeof(LuaSerialization).IsAssignableFrom(collectionType))
+            method = customTransferGenericMethod.MakeGenericMethod(collectionType);
+        else if (collectionType.GetGenericTypeDefinition() == dictionaryTypeDefinition)
+            method = dictionaryTransferGenericMethod.MakeGenericMethod(collectionType.GetGenericArguments());
+        else if (collectionType.GetGenericTypeDefinition() == listTypeDefinition)
+            method = listTransferGenericMethod.MakeGenericMethod(collectionType.GetGenericArguments());
+        else if (collectionType.IsArray)
+            method = arrayTransferGenericMethod.MakeGenericMethod(new Type[] { collectionType.GetElementType() });
+
+        return method;
+    }
+
+    static void NestBegin(StringBuilder sb, int indent)
+    {
         AppendIndent(sb, indent);
-        sb.Append("{\n");
-        var keyType = typeof(T);
-        var valueType = typeof(U);
-        bool bSerializeSuc = false;
+        sb.Append("{");
+    }
 
-        if (dic.Count <= 0)
-        {
-            bSerializeSuc = false;
-            sb.Remove(sb.Length - validContentLength, validContentLength);
-            return bSerializeSuc;
-        }
+    static void NestEnd(StringBuilder sb, int indent)
+    {
+        sb.Append("\n");
+        AppendIndent(sb, indent);
+        sb.Append("}");
+    }
 
-        if (keyType == typeof(float) || keyType == typeof(double) || keyType == typeof(bool))
+    static void AppendNonStringValue(StringBuilder sb, string data)
+    {
+        sb.AppendFormat("{0}, ", data);
+    }
+
+    static void AppendStringValue(StringBuilder sb, string data)
+    {
+        string value = string.Format("\"{0}\"", data).Replace("\n", @"\n").Replace("\"", @"\""");
+        sb.AppendFormat("{0}, ", value);
+    }
+
+    static bool IsDataTypeSerializable(Type type)
+    {
+        if (type != typeof(int) && type != typeof(string))
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine(string.Format("Can't Serialize Specify Data Type : {0} To Lua", keyType));
-            bSerializeSuc = false;
-            sb.Remove(sb.Length - validContentLength, validContentLength);
-            return bSerializeSuc;
+            Console.WriteLine(string.Format("Can't Serialize Specify Data Type : {0} To Lua", type));
+            return false;
         }
 
-        bool bStringKey = keyType == typeof(string);
-        string strTag = bStringKey ? "\"" : "";
-        ++indent;
-        AppendIndent(sb, indent);
-        foreach (var item in dic)
-        {
-            int tempValidContentLength = sb.Length;
-
-            sb.Append("[");
-            sb.Append(strTag);
-            /// 不管是不是自定义数据，只要tostring能用就行
-            sb.Append(item.Key);
-            sb.Append(strTag);
-            sb.Append("] = ");
-
-            if (typeof(LuaSerialization).IsAssignableFrom(valueType))
-            {
-                sb.Append("\n");
-                ++indent;
-                LuaSerialization serializor = item.Value as LuaSerialization;
-                if (serializor.Serialize(sb, indent))
-                {
-                    bSerializeSuc = true;
-                    sb.Append(",\n");
-                }
-                --indent;
-
-                if (!bSerializeSuc)
-                    sb.Remove(tempValidContentLength, sb.Length - tempValidContentLength);
-                else
-                    AppendIndent(sb, indent);
-            }
-            else if (valueType.IsClass)
-            {
-                if (valueType == typeof(string))
-                {
-                    sb.Append("\"");
-                    sb.Append(item.Value.ToString().Replace("\n", @"\n").Replace("\"", @"\"""));
-                    sb.Append("\"");
-                    sb.Append(", ");
-
-                    bSerializeSuc = true;
-                }
-                else
-                {
-                    MethodInfo method = null;
-                    if (valueType.GetGenericTypeDefinition() == dictionaryTypeDefinition)
-                        method = dictionaryTransferGenericMethod.MakeGenericMethod(valueType.GetGenericArguments());
-                    else if (valueType.GetGenericTypeDefinition() == listTypeDefinition)
-                        method = listTransferGenericMethod.MakeGenericMethod(valueType.GetGenericArguments());
-                    else if (valueType.IsArray)
-                        method = arrayTransferGenericMethod.MakeGenericMethod(new Type[] { valueType.GetElementType() });
-
-                    if (method != null)
-                    {
-                        sb.Append("\n");
-                        ++indent;
-                        bool bSeirializeResult = (bool)method.Invoke(null, new object[] { item.Value, sb, indent });
-                        if (bSeirializeResult)
-                        {
-                            bSerializeSuc = true;
-                            sb.Append(",\n");
-                        }
-                        --indent;
-
-                        if (!bSerializeSuc)
-                            sb.Remove(tempValidContentLength, sb.Length - tempValidContentLength);
-                        else
-                            AppendIndent(sb, indent);
-                    }
-                }
-            }
-            else if (valueType.IsValueType)
-            {
-                if (valueType.IsPrimitive)
-                {
-                    sb.Append(item.Value);
-                    sb.Append(", ");
-
-                    bSerializeSuc = true;
-                }
-                else
-                {
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine(string.Format("Can't Serialize Specify Data Type : {0} To Lua", valueType));
-                }
-            }
-        }
-
-        if (!bSerializeSuc)
-        {
-            sb.Remove(validContentLength, sb.Length - validContentLength);
-        }
-        else
-        {
-            sb.Append("\n");
-            AppendIndent(sb, indent - 1);
-            sb.Append("}");
-        }
-
-        return bSerializeSuc;
+        return true;
     }
 }
