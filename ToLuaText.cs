@@ -87,6 +87,8 @@ public static class ToLuaText
 
             if (SerializeData(sb, indent, item.Value))
                 bSerializeSuc = true;
+            else
+                WipeInvalidContent(sb, validContentLength);
         }
         --indent;
 
@@ -131,13 +133,10 @@ public static class ToLuaText
             sb.Append("\n");
             bSerializeSuc = (bool)transferMethod.Invoke(null, new object[] { data, sb, indent });
             if (bSerializeSuc)
-            {
                 sb.Append(",");
-            }
-            --indent;
-
-            if (!bSerializeSuc)
+            else
                 WipeInvalidContent(sb, validContentLength);
+            --indent;
         }
 
         return bSerializeSuc;
