@@ -714,7 +714,7 @@ namespace ExcelToLua
                     var arrayGetValueMethod = dataArray.GetType().GetMethod("GetValue", new Type[] { typeof(int) });
                     for (int i = 0; i < tempStringArray.Length; ++i)
                     {
-                        sb.AppendFormat(dataFormat, arrayGetValueMethod.Invoke(dataArray, new object[] { i }));
+                        sb.AppendFormat(dataFormat, arrayGetValueMethod.Invoke(dataArray, new object[] { i }).ToString().Replace("\n", @"\n").Replace("\"", @"\"""));
                         if (i < tempStringArray.Length - 1)
                             sb.Append(", ");
                     }
@@ -730,7 +730,7 @@ namespace ExcelToLua
             }
             else
             {
-                string tempStr = string.Format(dataFormat, originalData).Replace("\n", @"\n");
+                string tempStr = string.Format(dataFormat, originalData.Replace("\n", @"\n").Replace("\"", @"\"""));
                 sb.Append(tempStr);
                 bSerializeSuc = true;
             }

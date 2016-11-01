@@ -80,6 +80,7 @@ public static class ToLuaText
         ++indent;
         foreach (var item in dic)
         {
+            int tempValidContentLength = sb.Length;
             sb.Append("\n");
             AppendIndent(sb, indent);
             /// 不管是不是自定义数据，只要tostring能用就行
@@ -88,7 +89,7 @@ public static class ToLuaText
             if (SerializeData(sb, indent, item.Value))
                 bSerializeSuc = true;
             else
-                WipeInvalidContent(sb, validContentLength);
+                WipeInvalidContent(sb, tempValidContentLength);
         }
         --indent;
 
@@ -213,8 +214,8 @@ public static class ToLuaText
 
     static void AppendStringValue(StringBuilder sb, string data)
     {
-        string value = string.Format("\"{0}\"", data).Replace("\n", @"\n").Replace("\"", @"\""");
-        sb.AppendFormat("{0}, ", value);
+        string value = string.Format("\"{0}\", ", data.Replace("\n", @"\n").Replace("\"", @"\"""));
+        sb.Append(value);
     }
 
     static bool IsDataTypeSerializable(Type type)
