@@ -140,6 +140,7 @@ namespace ExcelToLua
                 int itorRowCount = itor.Current.Value;
                 int nestColumnEleCount = columnCount - startColumnIndex;
                 string columnName = tableCellNameList[startColumnIndex];
+
                 if (itor.MoveNext())
                 {
                     nestColumnEleCount = itor.Current.Key - startColumnIndex;
@@ -547,6 +548,7 @@ namespace ExcelToLua
         string originalData;
         string strKeyNameInNestedTable;
         Type cellType;
+        MethodInfo convertArrayDataGenericMethod;
 
         public string Desc { get; set; }
 
@@ -556,6 +558,7 @@ namespace ExcelToLua
             this.cellTag = cellTag;
             this.bColumnHead = bColumnHead;
             originalData = data;
+            convertArrayDataGenericMethod = typeof(CellInfo).GetMethod("ConvertArrayData", BindingFlags.NonPublic | BindingFlags.Instance);
 
             switch (type)
             {
@@ -577,7 +580,7 @@ namespace ExcelToLua
                     break;
             }
 
-            if (originalData.Contains(cellArrayTag))
+            if (originalData.Contains(cellArrayTag) || string.CompareOrdinal(cellTag, "[1]") == 0)
             {
                 bContainsArray = true;
             }
@@ -655,26 +658,16 @@ namespace ExcelToLua
             }
 
             string dataFormat = cellType == typeof(string) ? "\"{0}\"" : "{0}";
-            if (string.CompareOrdinal(cellTag, "[1]") == 0 || bContainsArray)
+            if (bContainsArray)
             {
                 var tempStringArray = originalData.Split(cellArrayTag[0]);
-                MethodInfo convertArrayDataGenericMethod = typeof(CellInfo).GetMethod("ConvertArrayData", BindingFlags.NonPublic | BindingFlags.Instance);
                 var convertMethod = convertArrayDataGenericMethod.MakeGenericMethod(new Type[] { cellType });
                 var transferMethod = ToLuaText.MakeGenericArrayTransferMethod(cellType);
 
                 try
                 {
                     var dataArray = convertMethod.Invoke(this, new object[] { tempStringArray });
-                    sb.Append("{");
-                    var arrayGetValueMethod = dataArray.GetType().GetMethod("GetValue", new Type[] { typeof(int) });
-                    for (int i = 0; i < tempStringArray.Length; ++i)
-                    {
-                        sb.AppendFormat(dataFormat, arrayGetValueMethod.Invoke(dataArray, new object[] { i }).ToString().Replace("\n", @"\n").Replace("\"", @"\"""));
-                        if (i < tempStringArray.Length - 1)
-                            sb.Append(", ");
-                    }
-                    sb.Append("}");
-
+                    transferMethod.Invoke(dataArray, new object[] { dataArray, sb, 0 });
                     bSerializeSuc = true;
                 }
                 catch (System.Exception e)
@@ -691,6 +684,7 @@ namespace ExcelToLua
             }
 
             string descFormatStr = null;
+
             if (!string.IsNullOrEmpty(originalData))
                 descFormatStr = ", --{0}";
             else if (bColumnHead)

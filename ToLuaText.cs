@@ -52,6 +52,11 @@ public static class ToLuaText
                 bSerializeSuc = true;
         }
 
+        if (!IsCommonData(typeof(T)))
+            sb.Append("\n");
+        else
+            sb.Remove(sb.Length - 2, 2);///移除最后一个", "字符组,为了部分满足强迫症
+
         if (bSerializeSuc)
             NestEnd(sb, indent);
         else
@@ -93,6 +98,7 @@ public static class ToLuaText
         }
         --indent;
 
+        sb.Append("\n");
         if (bSerializeSuc)
             NestEnd(sb, indent);
         else
@@ -202,7 +208,6 @@ public static class ToLuaText
 
     static void NestEnd(StringBuilder sb, int indent)
     {
-        sb.Append("\n");
         AppendIndent(sb, indent);
         sb.Append("}");
     }
@@ -228,5 +233,13 @@ public static class ToLuaText
         }
 
         return true;
+    }
+
+    static bool IsCommonData(Type type)
+    {
+        if (type == typeof(string) || type.IsPrimitive)
+            return true;
+
+        return false;
     }
 }
