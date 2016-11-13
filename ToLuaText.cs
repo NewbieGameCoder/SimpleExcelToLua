@@ -118,6 +118,12 @@ public static class ToLuaText
             sb.Append("\t");
     }
 
+    public static void AppendValue(Type valueType, string value, StringBuilder sb)
+    {
+        string dataFormat = valueType == typeof(string) ? "\"{0}\"" : "{0}";
+        sb.AppendFormat(dataFormat, value.Replace("\n", @"\n").Replace("\"", @"\"""));
+    }
+
     public static void WipeInvalidContent(StringBuilder sb, int validLength)
     {
         sb.Remove(validLength, sb.Length - validLength);
@@ -154,31 +160,16 @@ public static class ToLuaText
         Type dataType = typeof(T);
         bool bSerializeSuc = false;
 
-        if (dataType.IsValueType)
+        if (dataType.IsPrimitive || dataType == typeof(string))
         {
-            if (dataType.IsPrimitive)
-            {
-                AppendNonStringValue(sb, Data.ToString());
-                bSerializeSuc = true;
-            }
-            else
-            {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine(string.Format("Can't Serialize Specify Data Type : {0} To Lua", dataType));
-            }
+            AppendValue(dataType, Data.ToString(), sb);
+            sb.Append(", ");
+            bSerializeSuc = true;
         }
         else
         {
-            if (dataType != typeof(string))
-            {
-                MethodInfo nestEleTranferMethod = GetCollectionTransferMethod(dataType);
-                bSerializeSuc = SerializeNestData(sb, indent, Data, nestEleTranferMethod);
-            }
-            else
-            {
-                AppendStringValue(sb, Data.ToString());
-                bSerializeSuc = true;
-            }
+            MethodInfo nestEleTranferMethod = GetCollectionTransferMethod(dataType);
+            bSerializeSuc = SerializeNestData(sb, indent, Data, nestEleTranferMethod);
         }
 
         return bSerializeSuc;
@@ -210,17 +201,6 @@ public static class ToLuaText
     {
         AppendIndent(sb, indent);
         sb.Append("}");
-    }
-
-    static void AppendNonStringValue(StringBuilder sb, string data)
-    {
-        sb.AppendFormat("{0}, ", data);
-    }
-
-    static void AppendStringValue(StringBuilder sb, string data)
-    {
-        string value = string.Format("\"{0}\", ", data.Replace("\n", @"\n").Replace("\"", @"\"""));
-        sb.Append(value);
     }
 
     static bool IsDataTypeSerializable(Type type)
