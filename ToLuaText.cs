@@ -120,7 +120,7 @@ public static class ToLuaText
 
     public static void AppendValue(Type valueType, string value, StringBuilder sb)
     {
-        string dataFormat = valueType == typeof(string) ? "\"{0}\"" : "{0}";
+        string dataFormat = valueType == typeof(string) ? "\"{0}\", " : "{0}, ";
         sb.AppendFormat(dataFormat, value.Replace("\n", @"\n").Replace("\"", @"\"""));
     }
 
@@ -145,9 +145,7 @@ public static class ToLuaText
             ++indent;
             sb.Append("\n");
             bSerializeSuc = (bool)transferMethod.Invoke(null, new object[] { data, sb, indent });
-            if (bSerializeSuc)
-                sb.Append(",");
-            else
+            if (!bSerializeSuc)
                 WipeInvalidContent(sb, validContentLength);
             --indent;
         }
@@ -163,7 +161,6 @@ public static class ToLuaText
         if (dataType.IsPrimitive || dataType == typeof(string))
         {
             AppendValue(dataType, Data.ToString(), sb);
-            sb.Append(", ");
             bSerializeSuc = true;
         }
         else
@@ -200,7 +197,7 @@ public static class ToLuaText
     static void NestEnd(StringBuilder sb, int indent)
     {
         AppendIndent(sb, indent);
-        sb.Append("}");
+        sb.Append("},");
     }
 
     static bool IsDataTypeSerializable(Type type)
