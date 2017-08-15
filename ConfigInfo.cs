@@ -1,5 +1,5 @@
 ﻿using System;
-using System.Data;
+using OfficeOpenXml;
 using System.Text;
 using System.Reflection;
 using System.Collections;
@@ -31,14 +31,15 @@ namespace ExcelToLua
         Dictionary<int, int> columnsInfo;
         TableListNode tableColumnNodeList;
 
-        public ConfigInfo(string tableName, DataTable configTagble)
+        public ConfigInfo(string tableName, ExcelWorksheet configTagble)
         {
             if (configTagble == null)
                 return;
 
             this.tableName = tableName;
-            columnCount = configTagble.Columns.Count;
-            rowCount = configTagble.Rows.Count;
+            columnCount = configTagble.Dimension.Columns;
+            rowCount = configTagble.Dimension.Rows;
+            ExcelRange cells = configTagble.Cells;
             columnsInfo = new Dictionary<int, int>();
             tableCellDescList = new List<string>(columnCount);
             tableCellNameList = new List<string>(columnCount);
@@ -46,12 +47,16 @@ namespace ExcelToLua
             tableNestTagList = new List<string>(columnCount);
             rowsInfo = new List<List<CellInfo>>(rowCount - cellNameRowIndex);
 
-            for (int i = 0; i < columnCount; ++i)
+            for (int i = 1; i <= columnCount; ++i)
             {
-                string cellDesc = configTagble.Rows[cellDescRowIndex][i].ToString();
-                string cellName = configTagble.Rows[cellNameRowIndex][i].ToString().Trim();
-                string cellType = configTagble.Rows[cellTypeRowIndex][i].ToString().Trim().ToLower();
-                string nestTag = configTagble.Rows[nestTagRowIndex][i].ToString().Trim();
+                object cellValue = cells[cellDescRowIndex + 1, i].Value;
+                string cellDesc = cellValue != null ? cellValue.ToString() : "";
+                cellValue = cells[cellNameRowIndex + 1, i].Value;
+                string cellName = cellValue != null ? cellValue.ToString().Trim() : "";
+                cellValue = cells[cellTypeRowIndex + 1, i].Value;
+                string cellType = cellValue != null ? cellValue.ToString().Trim().ToLower() : "";
+                cellValue = cells[nestTagRowIndex + 1, i].Value;
+                string nestTag = cellValue != null ? cellValue.ToString().Trim() : "";
 
                 tableCellDescList.Add(cellDesc);
                 tableCellNameList.Add(cellName);
@@ -64,21 +69,22 @@ namespace ExcelToLua
                 if (Regex.IsMatch(nestTag, columnTagRegex)
                     && SerializeNestDataLength(nestTag, rowCount - nestTagRowIndex - 1, ref validRowCount))
                 {
-                    columnsInfo.Add(i, validRowCount);
+                    columnsInfo.Add(i - 1, validRowCount);
                     bColumnHeadDetected = true;
                 }
 
-                for (int j = 0; j < rowCount; ++j)
+                for (int j = 1; j <= rowCount; ++j)
                 {
-                    string data = configTagble.Rows[j][i].ToString();
+                    cellValue = cells[j, i].Value;
+                    string data = cellValue != null ? cellValue.ToString() : "";
                     CellInfo tempCellInfo = new CellInfo(bColumnHeadDetected, nestTag, cellName, cellType, data);
                     tempCellInfo.Desc = cellDesc;
 
-                    if (j >= rowsInfo.Count)
+                    if (j - 1 >= rowsInfo.Count)
                         rowsInfo.Add(new List<CellInfo>(columnCount));
 
-                    if (i >= rowsInfo[j].Count)
-                        rowsInfo[j].Add(tempCellInfo);
+                    if (i - 1 >= rowsInfo[j - 1].Count)
+                        rowsInfo[j - 1].Add(tempCellInfo);
                 }
             }
 

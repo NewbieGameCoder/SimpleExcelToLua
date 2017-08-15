@@ -50,7 +50,7 @@ namespace ExcelToLua
             FileDirectoryEnsurance(clientLuaFolderPath);
             ClearDirectory(serverLuaFolderPath);
             ClearDirectory(clientLuaFolderPath);
-            CopyNonExcelFiles(excelFolderPath, clientLuaFolderPath, serverLuaFolderPath);
+            //CopyNonExcelFiles(excelFolderPath, clientLuaFolderPath, serverLuaFolderPath);
 
             string[] excelFiles = Directory.GetFiles(excelFolderPath, "*.xlsx");
             if (excelFiles == null || excelFiles.Length == 0)
