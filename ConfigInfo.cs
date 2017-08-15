@@ -227,7 +227,7 @@ namespace ExcelToLua
                 string cellType = tableCellTypeList[enumColumnIndex];
                 TableNode subNode = rowsInfo[rowIndex][enumColumnIndex];
 
-                if (SerializeNestDataLength(cellTag, maxNestColumnCount - 1, ref subNestEleCount) || subNestEleCount != -1)
+                if (SerializeNestDataLength(cellTag, maxNestColumnCount, ref subNestEleCount) || subNestEleCount != -1)
                 {
                     int tempEndIndex = enumColumnIndex + 1;
 
