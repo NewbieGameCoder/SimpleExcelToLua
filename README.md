@@ -14,3 +14,9 @@
 
 本工具缺少很多Excel已经集成的数据检测，只提供一些较简单的数据检测，比如Key是否重复等。具体使用可以参考工具路径下的TestCase文件夹里面的示例文件。
 本工具还欠缺一个数据坍缩的功能（即直接将Excel文件转成[1] = 2013,的形式），尚不影响大部分情况下的使用，日后补全。
+
+简单示例：
+Excel :
+![image](https://github.com/NewbieGameCoder/SimpleExcelToLua/raw/master/Snapshot/excelCSS.bmp)
+Lua :
+![image](https://github.com/NewbieGameCoder/SimpleExcelToLua/raw/master/Snapshot/resualt.bmp)
